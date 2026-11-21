@@ -24,7 +24,7 @@ about 26 minutes one after another.
 | Harness | Proves, for every input | Time |
 | --- | --- | --- |
 | `time::at_hours_is_total_and_near_the_date` | Any f64 hours (NaN, ±∞, any size) on any supported date: no time, or one within 72 h of that date's 00:00 UTC. No panic. | 9 s |
-| `time::rounding_stays_within_a_minute` | Any moment within 5 days of the supported dates, any `Rounding`: `Nearest` moves it by −29..=30 s, `Up` by 0..=59 s, `None` not at all; the result is on a whole minute (but for `None`), rounding it again changes nothing, and it converts to a chrono `DateTime` (`Moment::utc` is total). | 390 s |
+| `time::rounding_stays_within_a_minute` | Any moment within 5 days of the supported dates, any `Rounding`: `Nearest` moves it by −29..=30 s, `Up` by 0..=59 s, `None` not at all; the result is on a whole minute (but for `None`), rounding it again changes nothing, and it converts to a jiff `Timestamp` (`Moment::utc` is total). | 390 s |
 | `astronomy::unit::normalized_to_scale_is_in_range` | Any finite f64 normalizes into [0, max) for max 1, 24 and 360 (angles, fractions of a day). | 2 s |
 | `astronomy::ops::days_since_solstice_is_a_day_of_the_year` | Any day 1..=366 of any year 1000..=3000, any latitude: a day of that year. | < 1 s |
 | `astronomy::ops::julian_day_is_total` | Any year 1000..=3000, month, day: a finite Julian day, no overflow. | < 1 s |
@@ -34,7 +34,7 @@ about 26 minutes one after another.
 | `schedule::night_times_are_in_order` | For any night (Maghrib before the next Fajr, any moments near the supported dates) and rounding: Maghrib ≤ the middle of the night ≤ the start of its last third ≤ the next Fajr, within the minute rounding moves them. | 498 s |
 | `schedule::current_and_next_bracket_the_moment` | For any 8 times and any moment: `current`'s index is the last time at or before it, `next`'s the first after it, and each is `None` exactly when there is none. (`PrayerTimes::current`, `next` and `time_remaining` are this, on their times.) | 3 s |
 | `schedule::latitudes_toward_the_equator_are_latitudes` | AqrabBalad's latitudes, from any latitude in any number of steps up to 180: valid latitudes, no farther from the equator, on the same side. | 1 s |
-| `schedule::prayer_times_new_is_total` | `PrayerTimes::new`, the public calculation, for any date chrono has (supported or not), any coordinates, any parameters without a polar circle resolution, with the astronomy (`Events::new`) any events or either of its errors, and `Moment::utc` stubbed (proven total above): no panic, and `DateOutOfRange` outside the supported dates. | 545 s |
+| `schedule::prayer_times_new_is_total` | `PrayerTimes::new`, the public calculation, for any date jiff has (supported or not), any coordinates, any parameters without a polar circle resolution, with the astronomy (`Events::new`) any events or either of its errors, and `Moment::utc` stubbed (proven total above): no panic, and `DateOutOfRange` outside the supported dates. | 545 s |
 | `schedule::polar_circle_resolution_steps_are_total` | The polar circle resolutions' searches, for any supported date, coordinates and parameters, with each day they try any times or none (`Day::unresolved` stubbed): AqrabBalad tries at most 180 latitudes, and every try of either search (any of the 180 latitudes, any of the ±183 days) is panic-free; the searches around them are std's iterators over those ranges. | 5 s |
 
 ### What the proofs assume
@@ -55,11 +55,11 @@ about 26 minutes one after another.
   moment within the bounds that harness proves. Each stub is an
   over-approximation of what it replaces, so a proof with it holds without
   it; the stubbed functions are proven on their own. (They are stubbed
-  because chrono's date arithmetic and 64-bit division are slow to verify.)
+  because jiff's date arithmetic and 64-bit division are slow to verify.)
   Stubbing needs Kani's `-Z stubbing`.
 - **Bounds.** Dates are 1000-01-01 to 3000-12-31 (`FIRST_DATE`,
   `LAST_DATE`; `PrayerTimes::new` returns `DateOutOfRange` outside them, and
-  `prayer_times_new_is_total` covers every other date chrono has). Moments
+  `prayer_times_new_is_total` covers every other date jiff has). Moments
   are within 5 days of those dates, which every moment the calculation makes
   is (solar events within 72 h of their date, shares of a night, i16 minutes
   of adjustment, AqrabYaum's 183 days moved by the same amount back).
@@ -75,7 +75,7 @@ about 26 minutes one after another.
   before its fix (see the git log), and Adhan's and salah's own examples.
 - **Property tests** (`tests/properties.rs`, proptest, 40,000 cases each),
   with the real astronomy:
-  - any f64 coordinates, any date chrono has, any parameters (angles, Isha
+  - any f64 coordinates, any date jiff has, any parameters (angles, Isha
     intervals, adjustments, every method, rule, resolution, rounding), any
     moment and zone: no panic, in `new`, `current`, `next`,
     `time_remaining` and `on_local_date`;
@@ -121,4 +121,4 @@ about 26 minutes one after another.
 - Whether a method's angles match an authority's published tables: methods
   are Adhan's, and agree with Adhan.
 - Time zones and daylight saving: times are UTC; converting them is the
-  caller's (`on_local_date` takes any chrono `TimeZone`).
+  caller's (`on_local_date` takes &jiff::tz::TimeZone).

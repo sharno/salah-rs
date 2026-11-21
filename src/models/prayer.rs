@@ -4,7 +4,7 @@
 // Copyright (c) 2019-2022 Farhan Ahmed. All rights reserved.
 //
 
-use chrono::Weekday;
+use jiff::civil::Weekday;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +57,7 @@ impl Prayer {
     /// Jumua on Fridays.
     pub fn name_on(&self, weekday: Weekday) -> &'static str {
         match (self, weekday) {
-            (Prayer::Dhuhr, Weekday::Fri) => "Jumua",
+            (Prayer::Dhuhr, Weekday::Friday) => "Jumua",
             _ => self.name(),
         }
     }
@@ -74,9 +74,9 @@ mod tests {
         assert_eq!(Prayer::Fajr.name(), "Fajr");
         assert_eq!(Prayer::FajrTomorrow.name(), "Fajr");
         assert_eq!(Prayer::Dhuhr.name(), "Dhuhr");
-        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Fri), "Jumua");
-        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Thu), "Dhuhr");
-        assert_eq!(Prayer::Asr.name_on(Weekday::Fri), "Asr");
+        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Friday), "Jumua");
+        assert_eq!(Prayer::Dhuhr.name_on(Weekday::Thursday), "Dhuhr");
+        assert_eq!(Prayer::Asr.name_on(Weekday::Friday), "Asr");
         assert_eq!(Prayer::Qiyam.name(), "Qiyam");
     }
 }

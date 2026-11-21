@@ -6,7 +6,7 @@
 
 use core::fmt;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 
 /// Why the prayer times of a day can't be calculated.
 ///
@@ -16,17 +16,17 @@ use chrono::NaiveDate;
 pub enum Error {
     /// The date is outside the years the calculations are made for,
     /// [`FIRST_DATE`](crate::FIRST_DATE) to [`LAST_DATE`](crate::LAST_DATE).
-    DateOutOfRange(NaiveDate),
+    DateOutOfRange(Date),
     /// The sun stays below the horizon all day (polar night).
-    SunNeverRises(NaiveDate),
+    SunNeverRises(Date),
     /// The sun stays above the horizon all day (midnight sun).
-    SunNeverSets(NaiveDate),
+    SunNeverSets(Date),
     /// The sun doesn't get high enough for the Asr shadow, or only at noon
     /// (near the polar circles in winter).
-    NoAsr(NaiveDate),
+    NoAsr(Date),
     /// The day's times aren't in order at least five minutes apart: near
     /// the polar circles, where the sun only just rises or sets.
-    TimesOutOfOrder(NaiveDate),
+    TimesOutOfOrder(Date),
 }
 
 impl fmt::Display for Error {

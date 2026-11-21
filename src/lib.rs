@@ -14,7 +14,7 @@
 //! use salah::prelude::*;
 //!
 //! let istanbul      = Coordinates::new(41.0082, 28.9784).expect("valid coordinates");
-//! let date          = NaiveDate::from_ymd_opt(2019, 1, 25).expect("Invalid date provided");
+//! let date          = Date::constant(2019, 1, 25);
 //! let params        = Configuration::with(Method::Turkey, Madhab::Hanafi);
 //! let prayers       = PrayerTimes::new(date, istanbul, params);
 //!
@@ -64,9 +64,9 @@ pub use crate::models::prayer::Prayer;
 pub use crate::models::rounding::Rounding;
 pub use crate::models::shafaq::Shafaq;
 pub use crate::schedule::{FIRST_DATE, LAST_DATE, PrayerTimes};
-pub use chrono::{
-    DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
-};
+pub use jiff::civil::{Date, DateTime, Time, Weekday, date};
+pub use jiff::tz::TimeZone;
+pub use jiff::{SignedDuration, Span, Timestamp, ToSpan, ZonedDateTime};
 
 /// A convenience module appropriate for glob imports (`use salah::prelude::*;`).
 pub mod prelude {
@@ -77,21 +77,20 @@ pub mod prelude {
         PolarCircleResolution, Prayer, PrayerTimes, Qiblah, Rounding, Shafaq, TimeAdjustment,
     };
     #[doc(no_inline)]
-    pub use chrono::{
-        DateTime, Datelike, Duration, NaiveDate, TimeDelta, TimeZone, Timelike, Utc, Weekday,
-    };
+    pub use jiff::civil::{Date, DateTime, Time, Weekday, date};
+    #[doc(no_inline)]
+    pub use jiff::tz::TimeZone;
+    #[doc(no_inline)]
+    pub use jiff::{SignedDuration, Span, Timestamp, ToSpan, ZonedDateTime};
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::prelude::*;
+    use jiff::tz::Offset;
 
     /// The six times as "H:MM" in `zone`, Fajr to Isha.
-    fn clock<Tz: TimeZone>(times: &PrayerTimes, zone: &Tz) -> [String; 6]
-    where
-        Tz::Offset: core::fmt::Display,
-    {
+    fn clock(times: &PrayerTimes, zone: &TimeZone) -> [String; 6] {
         [
             Prayer::Fajr,
             Prayer::Sunrise,
@@ -101,23 +100,21 @@ mod tests {
             Prayer::Isha,
         ]
         .map(|p| {
-            times
-                .time(p)
-                .with_timezone(zone)
-                .format("%-k:%M")
+            zone.to_datetime(times.time(p))
+                .strftime("%-H:%M")
                 .to_string()
         })
     }
 
     #[test]
     fn calculate_prayer_times() {
-        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let date = Date::new(2015, 7, 12).unwrap();
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
         let coordinates = Coordinates::new(35.7750, -78.6336).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
 
         assert_eq!(
-            clock(&times, &Utc),
+            clock(&times, &TimeZone::UTC),
             ["8:42", "10:08", "17:21", "22:22", "0:32", "1:57"]
         );
     }
@@ -126,17 +123,17 @@ mod tests {
     fn calculate_qiyam_times() {
         // Maghrib 2015-07-13T00:32Z, the next Fajr 08:43Z: the last third
         // of the night begins at 05:59Z.
-        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let date = Date::new(2015, 7, 12).unwrap();
         let params = Configuration::with(Method::NorthAmerica, Madhab::Hanafi);
         let coordinates = Coordinates::new(35.7750, -78.6336).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
 
         assert_eq!(
-            times.time(Prayer::Maghrib).format("%-k:%M").to_string(),
+            times.time(Prayer::Maghrib).strftime("%-H:%M").to_string(),
             "0:32"
         );
         assert_eq!(
-            times.time(Prayer::Qiyam).format("%-k:%M").to_string(),
+            times.time(Prayer::Qiyam).strftime("%-H:%M").to_string(),
             "5:59"
         );
     }
@@ -147,10 +144,10 @@ mod tests {
     fn calculate_times_for_singapore() {
         let mut params = Configuration::with(Method::Singapore, Madhab::Shafi);
         params.high_latitude_rule = HighLatitudeRule::MiddleOfTheNight;
-        let date = NaiveDate::from_ymd_opt(2021, 1, 13).unwrap();
+        let date = Date::new(2021, 1, 13).unwrap();
         let coordinates = Coordinates::new(1.370844612058886, 103.80145644060552).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
-        let sgt = FixedOffset::east_opt(8 * 3600).unwrap();
+        let sgt = TimeZone::fixed(Offset::from_seconds(8 * 3600).unwrap());
 
         assert_eq!(
             clock(&times, &sgt),
@@ -179,10 +176,10 @@ mod tests {
             .maghrib(2)
             .isha(4)
             .done();
-        let date = NaiveDate::from_ymd_opt(2021, 1, 12).unwrap();
+        let date = Date::new(2021, 1, 12).unwrap();
         let coordinates = Coordinates::new(-6.18233995, 106.84287154).unwrap();
         let times = PrayerTimes::new(date, coordinates, params).unwrap();
-        let wib = FixedOffset::east_opt(7 * 3600).unwrap();
+        let wib = TimeZone::fixed(Offset::from_seconds(7 * 3600).unwrap());
 
         assert_eq!(
             clock(&times, &wib),
@@ -193,7 +190,7 @@ mod tests {
     #[test]
     fn calculate_time_for_kuala_lumpur() {
         let location = Coordinates::new(3.12, 101.69).unwrap();
-        let date = NaiveDate::from_ymd_opt(2024, 4, 9).unwrap();
+        let date = Date::new(2024, 4, 9).unwrap();
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
 
         assert!(PrayerTimes::new(date, location, params).is_ok());

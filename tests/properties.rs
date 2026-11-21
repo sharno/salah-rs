@@ -3,7 +3,7 @@
 //! The Kani proofs (VERIFICATION.md) cover every input, but with the
 //! astronomy taken as any value; these run the real astronomy.
 
-use chrono::FixedOffset;
+use jiff::tz::{Offset, TimeZone};
 use proptest::prelude::*;
 use salah::prelude::*;
 
@@ -109,11 +109,17 @@ fn any_parameters() -> impl Strategy<Value = Parameters> {
         })
 }
 
-fn date(from: i32, to: i32) -> impl Strategy<Value = NaiveDate> {
-    (from..=to, 1u32..=366).prop_map(|(year, day)| {
-        NaiveDate::from_yo_opt(year, day)
-            .unwrap_or_else(|| NaiveDate::from_yo_opt(year, 365).unwrap())
-    })
+// Jiff's API expects i16 for years and day-of-year
+fn date(from: i16, to: i16) -> impl Strategy<Value = Date> {
+    let start = Date::new(from, 1, 1).unwrap();
+    let end = Date::new(to, 12, 31).unwrap();
+    let days = (end - start).get_days();
+    (0..=days).prop_map(move |d| start + d.days())
+}
+
+fn any_date() -> impl Strategy<Value = Date> {
+    let days = (Date::MAX - Date::MIN).get_days();
+    (0..=days).prop_map(move |d| Date::MIN + d.days())
 }
 
 fn coordinates() -> impl Strategy<Value = Coordinates> {
@@ -123,23 +129,23 @@ fn coordinates() -> impl Strategy<Value = Coordinates> {
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(40_000))]
 
-    /// Any f64s, any date chrono has, any parameters: never a panic.
+    /// Any f64s, any date Jiff has, any parameters: never a panic.
     #[test]
     fn never_panics(
         latitude in any::<f64>(),
         longitude in any::<f64>(),
-        days in any::<i32>(),
+        date in any_date(),
         parameters in any_parameters(),
         now in any::<i64>(),
     ) {
         let Ok(coordinates) = Coordinates::new(latitude, longitude) else { return Ok(()) };
-        let Some(date) = NaiveDate::from_num_days_from_ce_opt(days) else { return Ok(()) };
         if let Ok(times) = PrayerTimes::new(date, coordinates, parameters) {
-            if let Some(now) = DateTime::from_timestamp(now % 100_000_000_000, 0) {
+            if let Ok(now) = Timestamp::from_second(now % 100_000_000_000) {
                 let _ = (times.current(now), times.next(now), times.time_remaining(now));
             }
         }
-        let zone = FixedOffset::east_opt((now % 50_400) as i32).unwrap();
+        let offset = Offset::from_seconds((now % 50_400) as i32).unwrap();
+        let zone = offset.to_time_zone();
         let _ = PrayerTimes::on_local_date(date, &zone, coordinates, parameters);
     }
 
@@ -158,15 +164,15 @@ proptest! {
             prop_assert!(pair[0] < pair[1], "{:?}", six);
         }
         if parameters.rounding != Rounding::None {
-            prop_assert!(six.iter().all(|t| t.second() == 0));
+            prop_assert!(six.iter().all(|t| t.as_second() % 60 == 0));
         }
-        let mean_noon = date.and_hms_opt(12, 0, 0).unwrap().and_utc()
-            - TimeDelta::seconds((coordinates.longitude() * 240.0) as i64);
+        let mean_noon = TimeZone::UTC.to_timestamp(date.at(12, 0, 0, 0)).unwrap()
+            - SignedDuration::from_secs((coordinates.longitude() * 240.0) as i64);
         if parameters.polar_circle_resolution != PolarCircleResolution::AqrabYaum {
-            prop_assert!((times.time(Prayer::Dhuhr) - mean_noon).num_minutes().abs() <= 60);
+            prop_assert!(((times.time(Prayer::Dhuhr) - mean_noon).as_secs() / 60).abs() <= 60);
         }
         for time in six {
-            prop_assert!((time - mean_noon).num_hours().abs() <= 24);
+            prop_assert!(((time - mean_noon).as_secs() / 3600).abs() <= 24);
         }
     }
 
@@ -182,7 +188,7 @@ proptest! {
     ) {
         let Ok(times) = PrayerTimes::new(date, coordinates, parameters) else { return Ok(()) };
         // The next day's times need the day after's too, which may have none.
-        let Ok(next) = PrayerTimes::new(date.succ_opt().unwrap(), coordinates, parameters) else {
+        let Ok(next) = PrayerTimes::new(date.tomorrow().unwrap(), coordinates, parameters) else {
             return Ok(());
         };
         prop_assert_eq!(times.time(Prayer::FajrTomorrow), next.time(Prayer::Fajr));
@@ -225,7 +231,7 @@ proptest! {
         offset in -86_400i64..(3 * 86_400),
     ) {
         let Ok(times) = PrayerTimes::new(date, coordinates, parameters) else { return Ok(()) };
-        let now = date.and_hms_opt(0, 0, 0).unwrap().and_utc() + TimeDelta::seconds(offset);
+        let now = date.to_zoned_datetime(TimeZone::UTC).unwrap().timestamp() + offset.seconds();
         if let Some(current) = times.current(now) {
             prop_assert!(times.time(current) <= now);
         }
@@ -252,10 +258,11 @@ proptest! {
             o => o,
         };
         let coordinates = Coordinates::new(latitude, longitude).unwrap();
-        let zone = FixedOffset::east_opt(offset_hours * 3600).unwrap();
+        let offset = Offset::from_seconds(offset_hours * 3600).unwrap();
+        let zone = offset.to_time_zone();
         let parameters = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
         let times = PrayerTimes::on_local_date(date, &zone, coordinates, parameters).unwrap();
-        prop_assert_eq!(times.time(Prayer::Dhuhr).with_timezone(&zone).date_naive(), date);
+        prop_assert_eq!(zone.to_datetime(times.time(Prayer::Dhuhr)).date(), date);
     }
 
     /// Qiblah bearings are in [0, 360) everywhere.

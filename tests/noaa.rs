@@ -73,8 +73,8 @@ fn event(jd0: f64, latitude: f64, longitude: f64, altitude: f64, side: f64) -> O
     Some(minutes)
 }
 
-fn seconds_off(time: DateTime<Utc>, midnight: DateTime<Utc>, minutes: f64) -> i64 {
-    ((time - midnight).num_milliseconds() as f64 / 1000.0 - minutes * 60.0).round() as i64
+fn seconds_off(time: Timestamp, midnight: Timestamp, minutes: f64) -> i64 {
+    ((time - midnight).as_secs_f64() - minutes * 60.0).round() as i64
 }
 
 #[test]
@@ -88,9 +88,13 @@ fn sun_and_twilights_agree_with_noaa() {
     let mut compared = 0;
     for year in (1950..=2150).step_by(25) {
         for day in (1..=365).step_by(11) {
-            let date = NaiveDate::from_yo_opt(year, day).unwrap();
-            let midnight = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
-            let jd0 = 2440587.5 + midnight.timestamp() as f64 / 86400.0;
+            let date = date(year as i16, 1, 1)
+                .with()
+                .day_of_year(day as i16)
+                .build()
+                .unwrap();
+            let midnight = date.to_zoned_datetime(TimeZone::UTC).unwrap().timestamp();
+            let jd0 = 2440587.5 + midnight.as_second() as f64 / 86400.0;
             for latitude in (-65..=65).step_by(5).map(f64::from) {
                 for longitude in (-180..180).step_by(30).map(f64::from) {
                     let place = Coordinates::new(latitude, longitude).unwrap();

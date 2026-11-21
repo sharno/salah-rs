@@ -7,7 +7,9 @@
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::math::Float;
-use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
 
 use crate::models::rounding::Rounding;
 
@@ -26,14 +28,19 @@ const MAX_HOURS: f64 = 72.0;
 
 impl Moment {
     /// 00:00 UTC on `date`.
-    pub fn midnight(date: NaiveDate) -> Moment {
-        Moment(date.and_time(NaiveTime::MIN).and_utc().timestamp())
+    pub fn midnight(date: Date) -> Moment {
+        Moment(
+            date.to_zoned_datetime(TimeZone::UTC)
+                .unwrap()
+                .timestamp()
+                .as_second(),
+        )
     }
 
     /// `hours` after 00:00 UTC on `date`, down to the whole second (as
     /// Adhan's TimeComponents); None for no time (NaN: the sun never gets
     /// there) or one more than three days away.
-    pub fn at_hours(date: NaiveDate, hours: f64) -> Option<Moment> {
+    pub fn at_hours(date: Date, hours: f64) -> Option<Moment> {
         (-MAX_HOURS..=MAX_HOURS)
             .contains(&hours)
             .then(|| Moment::midnight(date).plus((hours * 3600.0).floor() as i64))
@@ -70,33 +77,36 @@ impl Moment {
         }
     }
 
-    /// As a chrono time; None only out of chrono's range, which a moment
+    /// As a Jiff timestamp; None only out of Jiff's range, which a moment
     /// near a supported date never is.
-    pub fn utc(self) -> Option<DateTime<Utc>> {
-        DateTime::from_timestamp(self.0, 0)
+    pub fn utc(self) -> Option<Timestamp> {
+        Timestamp::from_second(self.0).ok()
     }
 }
 
 /// Any date prayer times are calculated for.
 #[cfg(kani)]
-pub(crate) fn any_supported_date() -> NaiveDate {
-    use chrono::Datelike;
-    let days: i32 = kani::any();
-    kani::assume(
-        (crate::FIRST_DATE.num_days_from_ce()..=crate::LAST_DATE.num_days_from_ce())
-            .contains(&days),
-    );
-    NaiveDate::from_num_days_from_ce_opt(days).unwrap()
+pub(crate) fn any_supported_date() -> Date {
+    let year: i16 = kani::any();
+    kani::assume((1000..=3000).contains(&year));
+    let day: i16 = kani::any();
+    kani::assume((1..=365).contains(&day));
+    Date::new(year, 1, 1)
+        .unwrap()
+        .with()
+        .day_of_year(day)
+        .build()
+        .unwrap()
 }
 
 /// 00:00 UTC on FIRST_DATE and LAST_DATE, in Unix seconds (a test checks
-/// them against chrono).
+/// them against jiff).
 #[cfg(any(kani, test))]
 const SUPPORTED_SECONDS: (i64, i64) = (-30_610_224_000, 32_535_129_600);
 
 #[cfg(kani)]
 impl kani::Arbitrary for Moment {
-    /// Any moment within five days of the supported dates, without chrono
+    /// Any moment within five days of the supported dates, without jiff
     /// (which is slow to verify).
     fn any() -> Self {
         let seconds: i64 = kani::any();
@@ -124,7 +134,7 @@ mod proofs {
     }
 
     /// Rounding moves a time by under a minute, the right way, onto a whole
-    /// minute (or not at all), once; and the result is a chrono time.
+    /// minute (or not at all), once; and the result is a jiff time.
     #[kani::proof]
     fn rounding_stays_within_a_minute() {
         let moment: Moment = kani::any();
@@ -155,8 +165,8 @@ mod tests {
     use super::*;
 
     fn at(hms: &str) -> Moment {
-        let time: DateTime<Utc> = format!("2015-07-13T{hms}Z").parse().unwrap();
-        Moment(time.timestamp())
+        let time: Timestamp = format!("2015-07-13T{hms}Z").parse().unwrap();
+        Moment(time.as_second())
     }
 
     #[test]
@@ -185,7 +195,7 @@ mod tests {
 
     #[test]
     fn hours_are_floored_to_the_second_and_roll_over() {
-        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let date = Date::new(2015, 7, 12).unwrap();
         assert_eq!(
             Moment::at_hours(date, 24.0 + 4.0 / 3600.9),
             Some(at("00:00:03"))

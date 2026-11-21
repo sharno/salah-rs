@@ -59,7 +59,7 @@ fn times_agree_with_adhan() {
             continue;
         }
         let place = places[f[0]];
-        let date = NaiveDate::from_ymd_opt(
+        let date = Date::new(
             f[1].parse().unwrap(),
             f[2].parse().unwrap(),
             f[3].parse().unwrap(),
@@ -90,7 +90,7 @@ fn times_agree_with_adhan() {
 
         match (PrayerTimes::new(date, place, parameters), adhan[0]) {
             (Ok(times), Some(_)) => {
-                let midnight = date.and_hms_opt(0, 0, 0).unwrap().and_utc();
+                let midnight = date.to_zoned_datetime(TimeZone::UTC).unwrap().timestamp();
                 let ours = [
                     Prayer::Fajr,
                     Prayer::Sunrise,
@@ -102,7 +102,7 @@ fn times_agree_with_adhan() {
                 .map(|p| times.time(p))
                 .into_iter()
                 .chain([times.middle_of_the_night(), times.time(Prayer::Qiyam)])
-                .map(|t| (t - midnight).num_minutes());
+                .map(|t| (t - midnight).as_secs() / 60);
                 for ((name, ours), theirs) in [
                     "fajr",
                     "sunrise",
@@ -128,7 +128,7 @@ fn times_agree_with_adhan() {
             (Err(_), None) => neither += 1,
             // The next day has no times: its Fajr is part of salah's.
             (Err(error), Some(_)) => {
-                let next = date.succ_opt().unwrap();
+                let next = date.tomorrow().unwrap();
                 let next_has_none = match error {
                     Error::SunNeverRises(d)
                     | Error::SunNeverSets(d)

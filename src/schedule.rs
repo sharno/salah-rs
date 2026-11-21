@@ -12,7 +12,9 @@
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::math::Float;
-use chrono::{DateTime, Datelike, NaiveDate, TimeDelta, TimeZone, Utc};
+use jiff::civil::{Date, date};
+use jiff::tz::TimeZone;
+use jiff::{SignedDuration, Timestamp, ToSpan};
 
 use crate::astronomy::ops;
 use crate::astronomy::solar::SolarTime;
@@ -27,34 +29,34 @@ use crate::models::rounding::Rounding;
 use crate::time::Moment;
 
 /// The first date prayer times are calculated for.
-pub const FIRST_DATE: NaiveDate = NaiveDate::from_ymd_opt(1000, 1, 1).unwrap();
+pub const FIRST_DATE: Date = date(1000, 1, 1);
 /// The last date prayer times are calculated for. The astronomical series
 /// are Meeus's, made for the centuries around 2000; the bounds keep every
-/// date and time far from chrono's limits.
-pub const LAST_DATE: NaiveDate = NaiveDate::from_ymd_opt(3000, 12, 31).unwrap();
+/// date and time far from Jiff's limits.
+pub const LAST_DATE: Date = date(3000, 12, 31);
 
 /// A data struct to hold the timing for all
 /// prayers.
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub struct PrayerTimes {
-    fajr: DateTime<Utc>,
-    sunrise: DateTime<Utc>,
-    dhuhr: DateTime<Utc>,
-    asr: DateTime<Utc>,
-    maghrib: DateTime<Utc>,
-    isha: DateTime<Utc>,
-    middle_of_the_night: DateTime<Utc>,
-    qiyam: DateTime<Utc>,
-    fajr_tomorrow: DateTime<Utc>,
+    fajr: Timestamp,
+    sunrise: Timestamp,
+    dhuhr: Timestamp,
+    asr: Timestamp,
+    maghrib: Timestamp,
+    isha: Timestamp,
+    middle_of_the_night: Timestamp,
+    qiyam: Timestamp,
+    fajr_tomorrow: Timestamp,
     coordinates: Coordinates,
-    date: NaiveDate,
+    date: Date,
     parameters: Parameters,
 }
 
 /// The sun's day on a date, to the second.
 #[derive(Debug, Copy, Clone)]
 struct SolarDay {
-    date: NaiveDate,
+    date: Date,
     solar: SolarTime,
     transit: Moment,
     sunrise: Moment,
@@ -62,7 +64,7 @@ struct SolarDay {
 }
 
 impl SolarDay {
-    fn new(date: NaiveDate, coordinates: Coordinates) -> Result<SolarDay, Error> {
+    fn new(date: Date, coordinates: Coordinates) -> Result<SolarDay, Error> {
         let solar = SolarTime::new(date, coordinates);
         let (sunrise, sunset) = (solar.sunrise()?, solar.sunset()?);
         let at = |hours| Moment::at_hours(date, hours);
@@ -109,11 +111,7 @@ struct Events {
 }
 
 impl Events {
-    fn new(
-        date: NaiveDate,
-        coordinates: Coordinates,
-        parameters: &Parameters,
-    ) -> Result<Events, Error> {
+    fn new(date: Date, coordinates: Coordinates, parameters: &Parameters) -> Result<Events, Error> {
         let today = SolarDay::new(date, coordinates)?;
         // Of the next day only its sunrise, which ends the night: it may
         // have no sunset (the midnight sun beginning).
@@ -151,11 +149,7 @@ struct Day {
 impl Day {
     /// The times of the solar day of `date`, or, where there are none
     /// near the poles, those the polar circle resolution takes.
-    fn new(
-        date: NaiveDate,
-        coordinates: Coordinates,
-        parameters: &Parameters,
-    ) -> Result<Day, Error> {
+    fn new(date: Date, coordinates: Coordinates, parameters: &Parameters) -> Result<Day, Error> {
         Day::unresolved(date, coordinates, parameters).or_else(|error| match error {
             Error::DateOutOfRange(_) => Err(error),
             Error::SunNeverRises(_)
@@ -176,7 +170,7 @@ impl Day {
     /// half a degree, that has them on `date`; at the equator the season is
     /// the other hemisphere's, so the search stops there.
     fn nearest_latitude(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: &Parameters,
     ) -> Option<Day> {
@@ -186,7 +180,7 @@ impl Day {
 
     /// The times `steps` of AqrabBalad's toward the equator, if there are.
     fn at_latitude(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: &Parameters,
         steps: u32,
@@ -200,11 +194,7 @@ impl Day {
 
     /// The times of the nearest day that has them at the place, a day
     /// after then a day before, up to half a year away, moved to `date`.
-    fn nearest_day(
-        date: NaiveDate,
-        coordinates: Coordinates,
-        parameters: &Parameters,
-    ) -> Option<Day> {
+    fn nearest_day(date: Date, coordinates: Coordinates, parameters: &Parameters) -> Option<Day> {
         (1..=DAYS_SEARCHED)
             .flat_map(|days| [days, -days])
             .find_map(|days| Day::moved(date, coordinates, parameters, days))
@@ -212,12 +202,12 @@ impl Day {
 
     /// The times `days` from `date`, if there are, moved to `date`.
     fn moved(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: &Parameters,
         days: i64,
     ) -> Option<Day> {
-        let other = date.checked_add_signed(TimeDelta::days(days))?;
+        let other = date.checked_add(days.days()).ok()?;
         let day = Day::unresolved(other, coordinates, parameters).ok()?;
         Some(day.shifted(-days * SECONDS_PER_DAY))
     }
@@ -238,7 +228,7 @@ impl Day {
     /// The times of the solar day of `date`, which take the next day's
     /// sunrise for the length of the night.
     fn unresolved(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: &Parameters,
     ) -> Result<Day, Error> {
@@ -252,7 +242,7 @@ impl Day {
     /// total for any events (the Kani proofs take any).
     fn from_events(
         events: &Events,
-        date: NaiveDate,
+        date: Date,
         latitude: f64,
         parameters: &Parameters,
     ) -> Result<Day, Error> {
@@ -263,7 +253,7 @@ impl Day {
         let safe_fajr = if moonsighting {
             events.sunrise.plus(ops::season_adjusted_morning_twilight(
                 latitude,
-                date.ordinal(),
+                date.day_of_year() as u32,
                 date.year() as u32,
             ))
         } else {
@@ -286,7 +276,7 @@ impl Day {
                 let safe_isha = if moonsighting {
                     events.sunset.plus(ops::season_adjusted_evening_twilight(
                         latitude,
-                        date.ordinal(),
+                        date.day_of_year() as u32,
                         date.year() as u32,
                         parameters.shafaq,
                     ))
@@ -406,15 +396,15 @@ fn in_order(earlier: Moment, later: Moment) -> bool {
     later.since(earlier) >= MIN_GAP_SECONDS
 }
 
-fn next_day(date: NaiveDate) -> Result<NaiveDate, Error> {
-    date.succ_opt().ok_or(Error::DateOutOfRange(date))
+fn next_day(date: Date) -> Result<Date, Error> {
+    date.tomorrow().map_err(|_| Error::DateOutOfRange(date))
 }
 
 impl PrayerTimes {
     /// The prayer times of the solar day of the UTC date `date`, or why
     /// they can't be calculated.
     pub fn new(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: Parameters,
     ) -> Result<PrayerTimes, Error> {
@@ -433,7 +423,7 @@ impl PrayerTimes {
     /// `fajr_tomorrow`: its middle and the start of its last third (Adhan's
     /// SunnahTimes).
     fn from_days(
-        date: NaiveDate,
+        date: Date,
         coordinates: Coordinates,
         parameters: Parameters,
         day: Day,
@@ -467,26 +457,26 @@ impl PrayerTimes {
     /// where the zone keeps near its meridian: Kiritimati keeps UTC+14 at
     /// 157°W, so the solar day of a UTC date has its noon on the next day
     /// there.
-    pub fn on_local_date<Tz: TimeZone>(
-        date: NaiveDate,
-        zone: &Tz,
+    pub fn on_local_date(
+        date: Date,
+        zone: &TimeZone,
         coordinates: Coordinates,
         parameters: Parameters,
     ) -> Result<PrayerTimes, Error> {
         let times = PrayerTimes::new(date, coordinates, parameters)?;
-        let noon = times.dhuhr.with_timezone(zone).date_naive();
+        let noon = zone.to_datetime(times.dhuhr).date();
         match noon == date {
             true => Ok(times),
             false => {
                 let solar_date = date
-                    .checked_add_signed(date - noon)
-                    .ok_or(Error::DateOutOfRange(date))?;
+                    .checked_add(date - noon)
+                    .map_err(|_| Error::DateOutOfRange(date))?;
                 PrayerTimes::new(solar_date, coordinates, parameters)
             }
         }
     }
 
-    pub fn time(&self, prayer: Prayer) -> DateTime<Utc> {
+    pub fn time(&self, prayer: Prayer) -> Timestamp {
         match prayer {
             Prayer::Fajr => self.fajr,
             Prayer::Sunrise => self.sunrise,
@@ -500,7 +490,7 @@ impl PrayerTimes {
     }
 
     /// The UTC date whose solar day these are the times of.
-    pub fn date(&self) -> NaiveDate {
+    pub fn date(&self) -> Date {
         self.date
     }
 
@@ -513,26 +503,26 @@ impl PrayerTimes {
     }
 
     /// The middle of the night, from Maghrib to the next Fajr.
-    pub fn middle_of_the_night(&self) -> DateTime<Utc> {
+    pub fn middle_of_the_night(&self) -> Timestamp {
         self.middle_of_the_night
     }
 
     /// The prayer whose time has most recently come at `now`; None
     /// before this day's Fajr (the night of the day before).
-    pub fn current(&self, now: DateTime<Utc>) -> Option<Prayer> {
+    pub fn current(&self, now: Timestamp) -> Option<Prayer> {
         let index = last_at_or_before(&Prayer::IN_ORDER.map(|p| self.time(p)), &now)?;
         Prayer::IN_ORDER.get(index).copied()
     }
 
     /// The next prayer to come after `now`; None once tomorrow's Fajr has
     /// come (that is the next day's times).
-    pub fn next(&self, now: DateTime<Utc>) -> Option<Prayer> {
+    pub fn next(&self, now: Timestamp) -> Option<Prayer> {
         let index = first_after(&Prayer::IN_ORDER.map(|p| self.time(p)), &now)?;
         Prayer::IN_ORDER.get(index).copied()
     }
 
     /// The time from `now` to the next prayer, as in [`next`](Self::next).
-    pub fn time_remaining(&self, now: DateTime<Utc>) -> Option<TimeDelta> {
+    pub fn time_remaining(&self, now: Timestamp) -> Option<SignedDuration> {
         self.next(now).map(|prayer| self.time(prayer) - now)
     }
 }
@@ -668,14 +658,14 @@ mod proofs {
     /// Moment::utc, for the proofs below: proven total by
     /// time::proofs::rounding_stays_within_a_minute, and slow to verify.
     #[allow(dead_code)] // Used by kani::stub.
-    fn any_utc(_: Moment) -> Option<DateTime<Utc>> {
-        Some(DateTime::UNIX_EPOCH)
+    fn any_utc(_: Moment) -> Option<Timestamp> {
+        Some(Timestamp::UNIX_EPOCH)
     }
 
     /// The astronomy, for the proof below: any events, or either error it
     /// can return.
     #[allow(dead_code)] // Used by kani::stub.
-    fn any_events_result(date: NaiveDate, _: Coordinates, _: &Parameters) -> Result<Events, Error> {
+    fn any_events_result(date: Date, _: Coordinates, _: &Parameters) -> Result<Events, Error> {
         match kani::any::<u8>() {
             0 => Err(Error::SunNeverRises(date)),
             1 => Err(Error::SunNeverSets(date)),
@@ -683,7 +673,7 @@ mod proofs {
         }
     }
 
-    /// PrayerTimes::new, the public calculation, for any date chrono has
+    /// PrayerTimes::new, the public calculation, for any date Jiff has
     /// (supported or not), any coordinates, and any parameters without a
     /// polar circle resolution, with the astronomy any events at all and
     /// Moment::utc stubbed, never panics: it returns times or an Error, and
@@ -692,8 +682,8 @@ mod proofs {
     #[kani::stub(Events::new, any_events_result)]
     #[kani::stub(Moment::utc, any_utc)]
     fn prayer_times_new_is_total() {
-        let days: i32 = kani::any();
-        let Some(date) = NaiveDate::from_num_days_from_ce_opt(days) else {
+        let (year, month, day): (i16, i8, i8) = (kani::any(), kani::any(), kani::any());
+        let Ok(date) = Date::new(year, month, day) else {
             return;
         };
         let mut parameters: Parameters = kani::any();
@@ -719,7 +709,7 @@ mod proofs {
 
     /// A day, for the proof below: any times, or none.
     #[allow(dead_code)] // Used by kani::stub.
-    fn any_day_result(date: NaiveDate, _: Coordinates, _: &Parameters) -> Result<Day, Error> {
+    fn any_day_result(date: Date, _: Coordinates, _: &Parameters) -> Result<Day, Error> {
         match kani::any() {
             true => Ok(any_day()),
             false => Err(Error::TimesOutOfOrder(date)),
@@ -756,11 +746,7 @@ mod tests {
     use crate::models::high_altitude_rule::HighLatitudeRule;
     use crate::models::madhab::Madhab;
     use crate::models::rounding::Rounding;
-    use chrono::{NaiveDate, TimeZone, Utc};
-
-    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(year, month, day).unwrap()
-    }
+    use jiff::tz::{Offset, TimeZone};
 
     /// The six times as "H:MM" in UTC, Fajr to Isha.
     fn clock(times: &PrayerTimes) -> [String; 6] {
@@ -772,7 +758,7 @@ mod tests {
             Prayer::Maghrib,
             Prayer::Isha,
         ]
-        .map(|p| times.time(p).format("%-k:%M").to_string())
+        .map(|p| times.time(p).strftime("%-H:%M").to_string())
     }
 
     fn reference_day() -> PrayerTimes {
@@ -791,7 +777,11 @@ mod tests {
         // Isha 01:57, the last third of the night 05:59, the next Fajr
         // 08:43 (UTC).
         let times = reference_day();
-        let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
+        let at = |d, h, m| {
+            TimeZone::UTC
+                .to_timestamp(date(2015, 7, d).at(h, m, 0, 0))
+                .unwrap()
+        };
 
         assert_eq!(times.current(at(12, 8, 0)), None);
         assert_eq!(times.current(at(12, 9, 0)), Some(Prayer::Fajr));
@@ -810,12 +800,16 @@ mod tests {
         // which panicked before Fajr (PR #23) and on any day but today,
         // reading the clock itself (issue #17).
         let times = reference_day();
-        let at = |d, h, m| Utc.with_ymd_and_hms(2015, 7, d, h, m, 0).unwrap();
+        let at = |d, h, m| {
+            TimeZone::UTC
+                .to_timestamp(date(2015, 7, d).at(h, m, 0, 0))
+                .unwrap()
+        };
 
         assert_eq!(times.next(at(12, 8, 0)), Some(Prayer::Fajr));
         assert_eq!(
             times.time_remaining(at(12, 8, 0)),
-            Some(TimeDelta::minutes(42))
+            Some(SignedDuration::from_mins(42))
         );
         assert_eq!(times.next(at(12, 9, 0)), Some(Prayer::Sunrise));
         assert_eq!(times.next(at(13, 2, 0)), Some(Prayer::Qiyam));
@@ -897,7 +891,10 @@ mod tests {
 
         assert_eq!(
             times.time(Prayer::Isha),
-            Utc.with_ymd_and_hms(2026, 4, 20, 0, 0, 0).unwrap()
+            date(2026, 4, 20)
+                .to_zoned_datetime(TimeZone::UTC)
+                .unwrap()
+                .timestamp()
         );
     }
 
@@ -911,7 +908,10 @@ mod tests {
 
         assert_eq!(
             times.time(Prayer::Maghrib),
-            Utc.with_ymd_and_hms(2026, 11, 9, 0, 0, 0).unwrap()
+            date(2026, 11, 9)
+                .to_zoned_datetime(TimeZone::UTC)
+                .unwrap()
+                .timestamp()
         );
     }
 
@@ -946,7 +946,7 @@ mod tests {
             Prayer::Asr,
             Prayer::Maghrib,
         ]
-        .map(|p| chrono::Timelike::second(&times.time(p)));
+        .map(|p| (times.time(p).as_second() % 60) as u32);
         assert_ne!(seconds, [0; 5]);
     }
 
@@ -959,11 +959,11 @@ mod tests {
         let times = PrayerTimes::new(date(2026, 3, 21), tehran, params).unwrap();
 
         assert_eq!(
-            times.time(Prayer::Maghrib).format("%-k:%M").to_string(),
+            times.time(Prayer::Maghrib).strftime("%-H:%M").to_string(),
             "15:05"
         );
         assert_eq!(
-            times.time(Prayer::Isha).format("%-k:%M").to_string(),
+            times.time(Prayer::Isha).strftime("%-H:%M").to_string(),
             "15:52"
         );
     }
@@ -979,20 +979,22 @@ mod tests {
         let times = PrayerTimes::new(date(2026, 11, 3), suva, params).unwrap();
         assert_eq!(
             times.time(Prayer::Dhuhr),
-            Utc.with_ymd_and_hms(2026, 11, 2, 23, 51, 0).unwrap()
+            TimeZone::UTC
+                .to_timestamp(date(2026, 11, 2).at(23, 51, 0, 0))
+                .unwrap()
         );
 
         // On each side of the date line, noon is near 12:00 local mean
         // time on the date: 00:00 UTC that day at 180°, 24:00 at -180°.
-        for (longitude, offset) in [(180.0, 0), (-180.0, 24), (179.9, 0), (-179.9, 24)] {
+        for (longitude, offset) in [(180.0, 0i64), (-180.0, 24), (179.9, 0), (-179.9, 24)] {
             let place = Coordinates::new(0.0, longitude).unwrap();
             for day in [date(2026, 2, 11), date(2026, 11, 3)] {
                 let dhuhr = PrayerTimes::new(day, place, params)
                     .unwrap()
                     .time(Prayer::Dhuhr);
                 let mean_noon =
-                    day.and_hms_opt(0, 0, 0).unwrap().and_utc() + chrono::Duration::hours(offset);
-                let off = (dhuhr - mean_noon).num_minutes().abs();
+                    day.to_zoned_datetime(TimeZone::UTC).unwrap().timestamp() + offset.hours();
+                let off = ((dhuhr - mean_noon).as_secs() / 60).abs();
                 assert!(off < 30, "{longitude} on {day}: Dhuhr {dhuhr}");
             }
         }
@@ -1010,12 +1012,16 @@ mod tests {
         let july = PrayerTimes::new(date(2026, 7, 26), tromso, params).unwrap();
         assert_eq!(
             july.time(Prayer::Maghrib),
-            Utc.with_ymd_and_hms(2026, 7, 26, 22, 13, 0).unwrap()
+            TimeZone::UTC
+                .to_timestamp(date(2026, 7, 26).at(22, 13, 0, 0))
+                .unwrap()
         );
         let september = PrayerTimes::new(date(2026, 9, 14), tromso, params).unwrap();
         assert_eq!(
             september.time(Prayer::Isha),
-            Utc.with_ymd_and_hms(2026, 9, 14, 22, 6, 0).unwrap()
+            TimeZone::UTC
+                .to_timestamp(date(2026, 9, 14).at(22, 6, 0, 0))
+                .unwrap()
         );
     }
 
@@ -1101,7 +1107,10 @@ mod tests {
             ["4:34", "8:59", "10:31", "10:35", "12:00", "16:12"]
         );
         // Fajr and sunrise on the evening before, UTC.
-        assert_eq!(june.time(Prayer::Fajr).date_naive(), date(2026, 6, 20));
+        assert_eq!(
+            TimeZone::UTC.to_datetime(june.time(Prayer::Fajr)).date(),
+            date(2026, 6, 20)
+        );
     }
 
     #[test]
@@ -1110,10 +1119,9 @@ mod tests {
         // its Dhuhr on the next local date there.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
         let kiritimati = Coordinates::new(1.87, -157.40).unwrap();
-        let zone = chrono::FixedOffset::east_opt(14 * 3600).unwrap();
+        let zone = TimeZone::fixed(Offset::from_seconds(14 * 3600).unwrap());
         let day = date(2026, 3, 10);
-        let local =
-            |times: &PrayerTimes| times.time(Prayer::Dhuhr).with_timezone(&zone).date_naive();
+        let local = |times: &PrayerTimes| zone.to_datetime(times.time(Prayer::Dhuhr)).date();
 
         let utc_day = PrayerTimes::new(day, kiritimati, params).unwrap();
         assert_eq!(local(&utc_day), date(2026, 3, 11));
@@ -1121,7 +1129,7 @@ mod tests {
         assert_eq!(local(&local_day), day);
         // Where the zone fits its meridian, it is the UTC date's.
         let mecca = Coordinates::new(21.4225, 39.8262).unwrap();
-        let riyadh = chrono::FixedOffset::east_opt(3 * 3600).unwrap();
+        let riyadh = TimeZone::fixed(Offset::from_seconds(3 * 3600).unwrap());
         assert_eq!(
             PrayerTimes::on_local_date(day, &riyadh, mecca, params),
             PrayerTimes::new(day, mecca, params)
@@ -1141,12 +1149,12 @@ mod tests {
         assert_eq!(
             times
                 .time(Prayer::FajrTomorrow)
-                .format("%-k:%M")
+                .strftime("%-H:%M")
                 .to_string(),
             "22:52"
         );
         assert_eq!(
-            times.middle_of_the_night().format("%-k:%M").to_string(),
+            times.middle_of_the_night().strftime("%-H:%M").to_string(),
             "22:30"
         );
     }
@@ -1160,20 +1168,15 @@ mod tests {
         let north = Coordinates::new(58.82, 0.0).unwrap();
         let times = PrayerTimes::new(date(2026, 7, 6), north, params).unwrap();
         let gap = times.time(Prayer::Isha) - times.time(Prayer::Maghrib);
-        assert!(gap >= TimeDelta::minutes(5), "{gap}");
+        assert!(gap >= SignedDuration::from_mins(5), "{gap:?}");
     }
 
     #[test]
     fn dates_outside_the_supported_years_are_errors() {
-        // salah 0.7 panicked in its date arithmetic at chrono's last date.
+        // salah 0.7 panicked in its date arithmetic at the calendar library's last date.
         let params = Configuration::with(Method::MuslimWorldLeague, Madhab::Shafi);
         let mecca = Coordinates::new(21.4225, 39.8262).unwrap();
-        for date in [
-            NaiveDate::MAX,
-            NaiveDate::MIN,
-            date(999, 12, 31),
-            date(3001, 1, 1),
-        ] {
+        for date in [Date::MAX, Date::MIN, date(999, 12, 31), date(3001, 1, 1)] {
             assert_eq!(
                 PrayerTimes::new(date, mecca, params),
                 Err(Error::DateOutOfRange(date))

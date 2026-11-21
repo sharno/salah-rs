@@ -83,26 +83,26 @@ and `i16` adjustments.
 use salah::prelude::*;
 
 let makkah = Coordinates::new(21.4225, 39.8262).expect("valid coordinates");
-let date = NaiveDate::from_ymd_opt(2026, 3, 20).expect("a date");
+let date = Date::new(2026, 3, 20).expect("a date");
 let params = Configuration::with(Method::UmmAlQura, Madhab::Shafi);
 
 match PrayerTimes::new(date, makkah, params) {
     Ok(times) => {
         for prayer in [Prayer::Fajr, Prayer::Sunrise, Prayer::Dhuhr, Prayer::Asr, Prayer::Maghrib, Prayer::Isha] {
-            println!("{}: {}", prayer.name(), times.time(prayer).format("%H:%M UTC"));
+            println!("{}: {}", prayer.name(), times.time(prayer).strftime("%H:%M UTC"));
         }
         // The prayer at a moment, and the next one.
         let now = times.time(Prayer::Asr);
         assert_eq!(times.current(now), Some(Prayer::Asr));
         assert_eq!(times.next(now), Some(Prayer::Maghrib));
-        println!("Maghrib in {} minutes", times.time_remaining(now).unwrap().num_minutes());
+        println!("Maghrib in {} minutes", times.time_remaining(now).unwrap().as_secs() / 60);
     }
     Err(error) => println!("No prayer times: {error}"),
 }
 ```
 
-Times are `DateTime<Utc>`; show them in the place's time zone (with
-`chrono-tz`, say). `PrayerTimes::new` takes the solar day of a UTC date, whose
+Times are `Timestamp`; show them in the place's time zone (with
+`zone.to_datetime(t)` or `t.to_zoned_datetime(zone.clone())`). `PrayerTimes::new` takes the solar day of a UTC date, whose
 noon is near 12:00 local mean time; where a zone keeps far from its meridian,
 `PrayerTimes::on_local_date(date, &zone, ..)` takes the day whose Dhuhr falls
 on the local date.

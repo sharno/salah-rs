@@ -7,7 +7,7 @@
 #[cfg(not(feature = "std"))]
 #[allow(unused_imports)]
 use crate::math::Float;
-use chrono::{Datelike, NaiveDate};
+use jiff::civil::Date;
 
 use crate::astronomy::ops;
 use crate::astronomy::unit::Angle;
@@ -94,7 +94,7 @@ const HORIZON: Angle = Angle {
 /// which can be below 0 or above 24 away from the prime meridian).
 #[derive(Debug, Copy, Clone)]
 pub struct SolarTime {
-    date: NaiveDate,
+    date: Date,
     observer: Coordinates,
     solar: SolarCoordinates,
     prev_solar: SolarCoordinates,
@@ -107,9 +107,14 @@ pub struct SolarTime {
 
 impl SolarTime {
     /// The sun's day on `date` at `coordinates`.
-    pub fn new(date: NaiveDate, coordinates: Coordinates) -> SolarTime {
+    pub fn new(date: Date, coordinates: Coordinates) -> SolarTime {
         // All calculations are for 0h UTC of the date.
-        let julian_day = ops::julian_day(date.year(), date.month() as i32, date.day() as i32, 0.0);
+        let julian_day = ops::julian_day(
+            date.year().into(),
+            date.month().into(),
+            date.day().into(),
+            0.0,
+        );
         let prev_solar = SolarCoordinates::new(julian_day - 1.0);
         let solar = SolarCoordinates::new(julian_day);
         let next_solar = SolarCoordinates::new(julian_day + 1.0);
@@ -258,7 +263,7 @@ mod tests {
 
     #[test]
     fn calculate_solar_time() {
-        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let date = Date::new(2015, 7, 12).unwrap();
         let solar = SolarTime::new(date, reference_place());
 
         assert_eq!(clock(solar.transit), "17:20");
@@ -272,7 +277,7 @@ mod tests {
 
     #[test]
     fn calculate_time_for_solar_angle() {
-        let date = NaiveDate::from_ymd_opt(2015, 7, 12).unwrap();
+        let date = Date::new(2015, 7, 12).unwrap();
         let solar = SolarTime::new(date, reference_place());
         let angle = Angle::new(-6.0);
         let twilight_start = solar.time_for_solar_angle(angle, false).unwrap();
@@ -287,8 +292,8 @@ mod tests {
         // Inside the Arctic Circle: midnight sun in June, polar night in
         // December. salah 0.7 unwrapped the missing sunrise (issue #20).
         let arctic = Coordinates::new(69.65, 18.96).unwrap();
-        let june = NaiveDate::from_ymd_opt(2026, 6, 21).unwrap();
-        let december = NaiveDate::from_ymd_opt(2026, 12, 21).unwrap();
+        let june = Date::new(2026, 6, 21).unwrap();
+        let december = Date::new(2026, 12, 21).unwrap();
 
         assert_eq!(
             SolarTime::new(june, arctic).sunset(),
